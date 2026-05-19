@@ -13,9 +13,8 @@
     "webRequest"
   ],
   "host_permissions": [
-    "https://www.xiaohongshu.com/*",
+    "https://*.xiaohongshu.com/*",
     "https://xiaohongshu.com/*",
-    "https://creator.xiaohongshu.com/*",
     "ws://localhost/*"
   ],
   "background": {

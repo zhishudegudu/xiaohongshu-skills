@@ -318,3 +318,40 @@ content-type, server, x-application-context
 - 修改后的 `extension/{netlogger.js, background.js, interceptor.js, popup.html, popup.js, manifest.json}`
 - 本设计文档
 - 后续 brainstorming 出来的 implementation plan（spec 批准后由 writing-plans 产出）
+
+---
+
+## 附录：风控/上报域名调研（2026-05-19）
+
+通过 `performance.getEntriesByType('resource')` 在 xiaohongshu.com 上抓到的跨域 host 清单（首页 + 搜索 + 笔记详情 浏览 ~1min）：
+
+| Host | 用途推断 | 是否监听 |
+|---|---|---|
+| `apm-fe.xiaohongshu.com` | 前端 APM 监控（性能/错误/风控数据上报） | ✓ |
+| `as.xiaohongshu.com` | 应用统计 / 事件上报 | ✓ |
+| `edith.xiaohongshu.com` | XHS 主业务 API（含 /api/sns/web/...） | ✓ |
+| `t2.xiaohongshu.com` | tracking 上报 | ✓ |
+| `picasso-static.xiaohongshu.com` | 静态资源（图片处理服务） | ✓（业务域内，顺便监听） |
+| `www.xiaohongshu.com` / `xiaohongshu.com` / `creator.xiaohongshu.com` | 业务页面 + API | ✓ |
+| `sns-avatar-qc.xhscdn.com` / `sns-na-i2.xhscdn.com` / `sns-webpic-qc.xhscdn.com` | 图片 CDN | ✗（静态资源，过滤掉） |
+
+**固化的 `host_permissions`：**
+
+```json
+"host_permissions": [
+  "https://*.xiaohongshu.com/*",
+  "https://xiaohongshu.com/*",
+  "ws://localhost/*"
+]
+```
+
+一行通配 `*.xiaohongshu.com` 覆盖所有当前 + 未来 XHS 子域。`xhscdn.com` 不加（图片资源 / NETLOG_SKIP_TYPES 已过滤）。
+
+**调研未发现的潜在域名：**
+
+- 没看到 `fp.xiaohongshu.com`（指纹）—— 可能用 a1 cookie 派生 + edith 内嵌而非独立子域
+- 没看到 `sec.xiaohongshu.com`（安全）—— 同上
+- 没看到 sentry / aegis 等第三方 —— XHS 用自家 apm-fe，未外接
+
+如果后续遇到 netlog 漏抓某些请求，回头检查 host_permissions 是否需要扩展。
+
