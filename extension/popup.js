@@ -157,3 +157,138 @@ document.getElementById("clear-btn").addEventListener("click", () => {
   // 直接通过 background command 清空
   chrome.storage.session.set({ blockEvents: [] }, () => renderEvents([]));
 });
+
+// ─── NetLog 彩蛋激活 + 状态 ──────────────────────────────────────
+
+const NETLOG_HIT_TARGET = 5;
+const NETLOG_HIT_RESET_MS = 500;
+let _netlogHits = 0;
+let _netlogHitTimer = null;
+
+const titleEl = document.getElementById("title-hit");
+titleEl?.addEventListener("click", () => {
+  _netlogHits++;
+  clearTimeout(_netlogHitTimer);
+  _netlogHitTimer = setTimeout(() => { _netlogHits = 0; }, NETLOG_HIT_RESET_MS);
+  if (_netlogHits >= NETLOG_HIT_TARGET) {
+    _netlogHits = 0;
+    chrome.runtime.sendMessage({ type: "NETLOG_GET_ENABLED" }, (resp) => {
+      if (resp?.enabled) {
+        if (confirm("关闭 NetLog?")) toggleNetlog(false);
+      } else {
+        toggleNetlog(true);
+      }
+    });
+  }
+});
+
+function toggleNetlog(enabled) {
+  chrome.runtime.sendMessage({ type: "NETLOG_SET_ENABLED", enabled }, () => {
+    applyNetlogUI(enabled);
+    if (enabled) refreshNetlog();
+  });
+}
+
+function applyNetlogUI(enabled) {
+  document.body.classList.toggle("netlog-on", !!enabled);
+}
+
+// 初始化：根据当前启用状态决定显示
+chrome.runtime.sendMessage({ type: "NETLOG_GET_ENABLED" }, (resp) => {
+  if (resp?.enabled) {
+    applyNetlogUI(true);
+    refreshNetlog();
+  }
+});
+
+document.getElementById("netlog-disable")?.addEventListener("click", () => toggleNetlog(false));
+document.getElementById("netlog-clear")?.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "NETLOG_CLEAR" }, () => refreshNetlog());
+});
+
+// ─── NetLog 时序流渲染 ──────────────────────────────────────────
+
+let _netlogEntries = [];
+let _netlogTab = "stream";
+
+function refreshNetlog() {
+  chrome.runtime.sendMessage({ type: "NETLOG_GET_ALL" }, (resp) => {
+    _netlogEntries = resp?.entries || [];
+    renderNetlog();
+  });
+}
+
+function renderNetlog() {
+  const countEl = document.getElementById("netlog-count");
+  if (countEl) countEl.textContent = `${_netlogEntries.length} 条`;
+
+  const list = document.getElementById("netlog-list");
+  if (!list) return;
+
+  if (_netlogTab === "stream") {
+    renderNetlogStream(list);
+  } else {
+    renderNetlogCategory(list);
+  }
+}
+
+const NETLOG_CAT_LABEL = {
+  fingerprint_upload: "指纹↑",
+  business_error: "错误",
+  risk_redirect: "风控跳",
+  signature_failure: "签名失败",
+  cookie_change: "Cookie 变",
+  business_api: "API",
+  page_nav: "导航",
+  other: "其他",
+};
+
+function renderNetlogStream(container) {
+  // 最新在底，倒序展示前 200 条
+  const slice = _netlogEntries.slice(-200);
+  container.innerHTML = slice.map((e, i) => {
+    const star = (e.category === "fingerprint_upload" || e.category === "risk_redirect" ||
+                  e.category === "signature_failure") ? " ★" : "";
+    const path = e.path.length > 50 ? e.path.slice(0, 47) + "…" : e.path;
+    const host = e.host.replace(/^www\./, "");
+    return `<div class="netlog-row cat-${e.category}" data-idx="${i}">
+      ${e.tsLabel}  ${e.method.padEnd(4)} ${e.status || "?"}  ${e.duration_ms}ms  ${host}${path}  [${NETLOG_CAT_LABEL[e.category]}]${star}
+    </div>`;
+  }).join("");
+
+  // 点击展开详情
+  container.querySelectorAll(".netlog-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const idx = Number(row.dataset.idx);
+      showNetlogDetail(slice[idx]);
+    });
+  });
+  // 滚到底
+  container.scrollTop = container.scrollHeight;
+}
+
+function showNetlogDetail(entry) {
+  const el = document.getElementById("netlog-detail");
+  if (!el) return;
+  el.style.display = "block";
+  el.textContent = JSON.stringify(entry, null, 2);
+}
+
+// tab 切换
+document.querySelectorAll(".netlog-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".netlog-tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    _netlogTab = tab.dataset.tab;
+    renderNetlog();
+  });
+});
+
+// 实时增量
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "NETLOG_ENTRY_ADDED" && document.body.classList.contains("netlog-on")) {
+    _netlogEntries.push(msg.entry);
+    if (_netlogEntries.length > 500) _netlogEntries.splice(0, _netlogEntries.length - 500);
+    renderNetlog();
+  }
+});
