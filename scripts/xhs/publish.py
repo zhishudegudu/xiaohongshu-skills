@@ -176,50 +176,45 @@ def _navigate_to_publish_page(page: Page) -> None:
 
 
 def _click_publish_tab(page: Page, tab_name: str) -> None:
-    """点击发布页 TAB（上传图文/上传视频）。"""
+    """点击发布页 TAB（上传图文/上传视频/写长文/发播客）。
+
+    XHS 创作中心反爬：非激活 tab 会用 left/top: -9999px 或 opacity: 1e-05 隐藏，
+    但保留 pointer-events: auto 可点击。所以 selector 不能查可见性，要用属性精确匹配。
+    """
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        # 查找匹配的 TAB（支持多种结构）
         found = page.evaluate(
             f"""
             (() => {{
-                // 策略1: 查找 div.creator-tab（过滤隐藏元素）
-                let tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
-                for (const tab of tabs) {{
-                    const titleSpan = tab.querySelector('span.title');
-                    const tabText = titleSpan ? titleSpan.textContent.trim() : tab.textContent.trim();
-                    if (tabText === {json.dumps(tab_name)}) {{
-                        const rect = tab.getBoundingClientRect();
-                        const style = window.getComputedStyle(tab);
-                        // 跳过隐藏或被移出视口的元素
-                        if (rect.width === 0 || rect.height === 0) continue;
-                        if (rect.left < 0 || rect.top < 0) continue;
-                        if (style.display === 'none' || style.visibility === 'hidden') continue;
-                        const x = rect.left + rect.width / 2;
-                        const y = rect.top + rect.height / 2;
-                        const target = document.elementFromPoint(x, y);
-                        if (target === tab || tab.contains(target)) {{
-                            tab.click();
-                            return 'clicked';
-                        }}
-                        return 'blocked';
-                    }}
+                const name = {json.dumps(tab_name)};
+                // 策略1: data-hp-kind 属性精确匹配（XHS 给每个 tab 打了 data-hp-kind="creator-tab-<名称>"）
+                let tab = document.querySelector('div.creator-tab[data-hp-kind="creator-tab-' + name + '"]');
+                if (tab) {{
+                    tab.click();
+                    return 'clicked';
                 }}
-                
-                // 策略2: 查找任意包含目标文本的元素
-                const allElements = document.querySelectorAll('*');
-                for (const el of allElements) {{
-                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(tab_name)}) {{
-                        const rect = el.getBoundingClientRect();
-                        const style = window.getComputedStyle(el);
-                        if (rect.width === 0 || rect.height === 0) continue;
-                        if (rect.left < 0 || rect.top < 0) continue;
+
+                // 策略2: 通过 span.title 子元素文字匹配（兼容无 data-hp-kind 的版本）
+                const tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
+                for (const t of tabs) {{
+                    const title = t.querySelector('span.title');
+                    if (title && title.textContent.trim() === name) {{
+                        const style = window.getComputedStyle(t);
+                        // 只查 display:none / visibility:hidden（真正不可点）；不查 opacity / position
                         if (style.display === 'none' || style.visibility === 'hidden') continue;
-                        el.click();
+                        t.click();
                         return 'clicked';
                     }}
                 }}
-                
+
+                // 策略3: textContent 直接匹配（最宽松兜底）
+                for (const t of tabs) {{
+                    if (t.textContent.trim() === name) {{
+                        t.click();
+                        return 'clicked';
+                    }}
+                }}
+
                 return 'not_found';
             }})()
             """
