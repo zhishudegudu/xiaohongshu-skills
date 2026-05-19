@@ -10,7 +10,7 @@
  */
 
 importScripts("netlogger.js");
-netlogInit();
+netlogInit().catch(e => console.warn("[XHS NetLogger] init failed", e));
 
 const BRIDGE_URL = "ws://localhost:9333";
 let ws = null;
