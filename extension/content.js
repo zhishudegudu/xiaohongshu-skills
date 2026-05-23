@@ -10,10 +10,16 @@
  */
 
 // ── interceptor.js (MAIN world) → background.js 桥接 ────────
+// 注意：扩展 reload 后老 content script 仍在页面，但 chrome.runtime context 失效。
+// 此时 sendMessage 会同步抛 "Extension context invalidated"（.catch 抓不到），
+// 必须先用 chrome.runtime?.id 检测 context 是否还存活。
 window.addEventListener("message", (e) => {
   if (e.source !== window) return;
   if (e.data?.source !== "xhs-interceptor" || e.data?.type !== "BLOCK_EVENT") return;
-  chrome.runtime.sendMessage({ type: "XHS_BLOCK_EVENT", event: e.data.event }).catch(() => {});
+  if (!chrome.runtime?.id) return; // context invalidated, orphan content script
+  try {
+    chrome.runtime.sendMessage({ type: "XHS_BLOCK_EVENT", event: e.data.event }).catch(() => {});
+  } catch (_) { /* runtime gone between guard and call */ }
 });
 
 // 通知 interceptor.js：content.js 已就绪，可以 flush 排队的事件
@@ -229,11 +235,13 @@ function sleep(ms) {
 // MAIN world interceptor → content (postMessage) → background (runtime)
 window.addEventListener("message", (e) => {
   if (e.source !== window) return;
-  if (e.data?.source === "xhs-netlog-intercept") {
+  if (e.data?.source !== "xhs-netlog-intercept") return;
+  if (!chrome.runtime?.id) return; // extension reloaded, content script orphaned
+  try {
     chrome.runtime.sendMessage({
       type: "NETLOG_INTERCEPTOR_ENTRY",
       payload: e.data,
     }).catch(() => {});
-  }
+  } catch (_) { /* runtime gone between guard and call */ }
 });
 
